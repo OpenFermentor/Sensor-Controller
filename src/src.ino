@@ -8,10 +8,10 @@
 #define MAX_INPUT_LENGTH 255
 
 // Pins
-#define PUMPENABLE 1
-#define PUMPPIN1 2
-#define PUMPPIN2 3
-#define ONE_WIRE_BUS 15
+#define PUMPENABLE 21
+#define PUMPPIN1 22
+#define PUMPPIN2 23
+#define ONE_WIRE_BUS 5
 
 // Variables
 char input[MAX_INPUT_LENGTH];
@@ -19,6 +19,7 @@ OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 
 void setup() {
+  Serial.begin(SERIAL_BAUD);
   pinMode(PUMPENABLE, OUTPUT);
   digitalWrite(PUMPENABLE, LOW);
   pinMode(PUMPPIN1, OUTPUT);

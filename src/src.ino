@@ -6,26 +6,26 @@
 // General
 #define SERIAL_BAUD 115200
 #define MAX_INPUT_LENGTH 255
-#define ANALOG_READ_MAX 4095
+#define ANALOG_READ_MAX 1023
 
 // Pins
-const int PUMPENABLE[] = {12, 25};
-const int PUMPPIN1[] = {13, 32};
-const int PUMPPIN2[] = {14, 33};
-#define ONE_WIRE_BUS 26
-#define TURBIDITY_SENSOR 27
-#define PH_SENSOR 34
+const int PUMPENABLE[] = {8, 9};
+const int PUMPPIN1[] = {10, 11};
+const int PUMPPIN2[] = {12, 13};
+#define ONE_WIRE_BUS 2
+#define TURBIDITY_SENSOR A2
+#define PH_SENSOR A1
 
 // Variables
 char input[MAX_INPUT_LENGTH];
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
-double phAcidOffset = -1;
-double phAcidOffsetPhValue = 4;
-double phNeutralOffset = -1;
-double phNeutralOffsetPhValue = 7;
-double phBaseOffset = -1;
-double phBaseOffsetPhValue = 10;
+double phAcidOffset = 627;
+int phAcidOffsetPhValue = 4;
+double phNeutralOffset = 512;
+int phNeutralOffsetPhValue = 7;
+double phBaseOffset = 418;
+int phBaseOffsetPhValue = 10;
 
 void setup() {
   Serial.begin(SERIAL_BAUD);
@@ -41,6 +41,8 @@ void setup() {
   digitalWrite(PUMPPIN2[0], LOW);
   pinMode(PUMPPIN2[1], OUTPUT);
   digitalWrite(PUMPPIN2[1], LOW);
+  pinMode(TURBIDITY_SENSOR, INPUT);
+  pinMode(PH_SENSOR, INPUT);
 }
 
 void loop() {
@@ -52,18 +54,22 @@ void loop() {
     input[terminatorAt] = 0;
     char* command = strtok(input, " ");
     if (strcmp(command, "getTemp") == 0) {
-      getTemperature();
+      getTemp();
+    }
+    else if (strcmp(command, "getPhOffset") == 0) {
+      getPhOffset();
     }
     else if (strcmp(command, "setPhOffset") == 0) {
       char* type = strtok(0, " ");
-      char* actualValue = strtok(0, " ");
-      setPhOffset(type, actualValue);
+      char* phValue = strtok(0, " ");
+      char* offset = strtok(0, " ");
+      setPhOffset(type, phValue, offset);
     }
     else if (strcmp(command, "getPh") == 0) {
-      getPH();
+      getPh();
     }
     else if (strcmp(command, "getTurb") == 0) {
-      getTurb();
+      Serial.println(0.00);
     }
     else if (strcmp(command, "setPump") == 0) {
       char* pump = strtok(0, " ");
@@ -76,7 +82,7 @@ void loop() {
   }
 }
 
-void getTemperature() {
+void getTemp() {
   sensors.requestTemperatures();
   double temp = sensors.getTempCByIndex(0);
   if (temp == -127.00) {
@@ -86,21 +92,26 @@ void getTemperature() {
   }
 }
 
-void setPhOffset(char* type, char* charPhValue) {
-  double phValue = atof(charPhValue);
+void getPhOffset() {
   int sensor = analogRead(PH_SENSOR);
+  Serial.println(sensor);
+}
+
+void setPhOffset(char* type, char* charPhValue, char* charOffset) {
+  double phValue = atof(charPhValue);
+  int offset = atof(charOffset);
   if (strcmp(type, "acid") == 0) {
-    phAcidOffset = sensor;
+    phAcidOffset = offset;
     phAcidOffsetPhValue = phValue;
     Serial.println("OK");
   }
   else if (strcmp(type, "neutral") == 0) {
-    phNeutralOffset = sensor;
+    phNeutralOffset = offset;
     phNeutralOffsetPhValue = phValue;
     Serial.println("OK");
   }
   else if (strcmp(type, "base") == 0) {
-    phBaseOffset = sensor;
+    phBaseOffset = offset;
     phBaseOffsetPhValue = phValue;
     Serial.println("OK");
   }
@@ -110,26 +121,29 @@ void setPhOffset(char* type, char* charPhValue) {
   }
 }
 
-void getPH() {
-  if (phAcidOffset == -1 || phNeutralOffset == -1 || phBaseOffset == -1) {
-    Serial.println("Error while reading ph.");
+void getPh() {
+  int sensor = analogRead(PH_SENSOR);
+  double ph;
+  if (sensor < phNeutralOffset) {
+    ph = mapDouble(sensor, phBaseOffset, phNeutralOffset, phBaseOffsetPhValue, phNeutralOffsetPhValue);
   }
   else {
-    double sensor = ANALOG_READ_MAX - analogRead(PH_SENSOR);
-    double ph;
-    if (sensor < phNeutralOffset) { // check this
-      ph = mapDouble(sensor, phAcidOffset, phNeutralOffset, phAcidOffsetPhValue, phNeutralOffsetPhValue);
-    }
-    else {
-      ph = mapDouble(sensor, phNeutralOffset, phBaseOffset, phNeutralOffsetPhValue, phBaseOffsetPhValue);
-    }
-    Serial.println(ph); 
+    ph = mapDouble(sensor, phNeutralOffset, phAcidOffset, phNeutralOffsetPhValue, phAcidOffsetPhValue);
   }
+  Serial.println(ph);
 }
 
 void getTurb() {
-  double sensor = analogRead(TURBIDITY_SENSOR);
-  Serial.println(sensor / ANALOG_READ_MAX * 100);
+  double voltage = (double)analogRead(A0) * 5 / ANALOG_READ_MAX;
+  double NTP;
+  if (voltage < 2.56) {
+    NTP = 3000;
+  } else if (voltage > 4.2) {
+    NTP = 0;
+  } else {
+    NTP = -1120.4*voltage*voltage + 5742.3*voltage - 4352.9;
+  }
+  Serial.println(voltage);
 }
 
 void setPumpMultiple(char* pump, char* movements) {
@@ -180,4 +194,3 @@ void turnPumpBackwards(int pump) {
 double mapDouble(double x, double in_min, double in_max, double out_min, double out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
-

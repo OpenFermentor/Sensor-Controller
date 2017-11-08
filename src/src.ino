@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <string.h>
+#include <Wire.h>
 #include <OneWire.h>;
 #include <DallasTemperature.h>;
 
@@ -7,25 +8,19 @@
 #define SERIAL_BAUD 115200
 #define MAX_INPUT_LENGTH 255
 #define ANALOG_READ_MAX 1023
+#define PH_I2C_ADDRESS 99
 
 // Pins
-const int PUMPENABLE[] = {8, 9};
-const int PUMPPIN1[] = {10, 11};
-const int PUMPPIN2[] = {12, 13};
+const byte PUMPENABLE[] = {5, 6, 3};
+const byte PUMPPIN1[] = {8, 10, 12};
+const byte PUMPPIN2[] = {9, 11, 13};
 #define ONE_WIRE_BUS 2
-#define TURBIDITY_SENSOR A2
-#define PH_SENSOR A1
 
 // Variables
 char input[MAX_INPUT_LENGTH];
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
-double phAcidOffset = 627;
-int phAcidOffsetPhValue = 4;
-double phNeutralOffset = 512;
-int phNeutralOffsetPhValue = 7;
-double phBaseOffset = 418;
-int phBaseOffsetPhValue = 10;
+float temperature;
 
 void setup() {
   Serial.begin(SERIAL_BAUD);
@@ -41,8 +36,7 @@ void setup() {
   digitalWrite(PUMPPIN2[0], LOW);
   pinMode(PUMPPIN2[1], OUTPUT);
   digitalWrite(PUMPPIN2[1], LOW);
-  pinMode(TURBIDITY_SENSOR, INPUT);
-  pinMode(PH_SENSOR, INPUT);
+  Wire.begin();
 }
 
 void loop() {
@@ -56,20 +50,12 @@ void loop() {
     if (strcmp(command, "getTemp") == 0) {
       getTemp();
     }
-    else if (strcmp(command, "getPhOffset") == 0) {
-      getPhOffset();
-    }
-    else if (strcmp(command, "setPhOffset") == 0) {
+    else if (strcmp(command, "calibratePh") == 0) {
       char* type = strtok(0, " ");
-      char* phValue = strtok(0, " ");
-      char* offset = strtok(0, " ");
-      setPhOffset(type, phValue, offset);
+      calibratePh(type);
     }
     else if (strcmp(command, "getPh") == 0) {
       getPh();
-    }
-    else if (strcmp(command, "getTurb") == 0) {
-      Serial.println(0.00);
     }
     else if (strcmp(command, "setPump") == 0) {
       char* pump = strtok(0, " ");
@@ -84,69 +70,41 @@ void loop() {
 
 void getTemp() {
   sensors.requestTemperatures();
-  double temp = sensors.getTempCByIndex(0);
-  if (temp == -127.00) {
-    Serial.println("Error while reading temperature.");
+  float readValue = sensors.getTempCByIndex(0);
+  if (readValue == -127.00) {
+    Serial.println("ERROR");
   } else {
-    Serial.println(temp);
+    Serial.println(readValue);
+    temperature = readValue;
   }
 }
 
-void getPhOffset() {
-  int sensor = analogRead(PH_SENSOR);
-  Serial.println(sensor);
-}
-
-void setPhOffset(char* type, char* charPhValue, char* charOffset) {
-  double phValue = atof(charPhValue);
-  int offset = atof(charOffset);
+void calibratePh(char* type) {
   if (strcmp(type, "acid") == 0) {
-    phAcidOffset = offset;
-    phAcidOffsetPhValue = phValue;
+    sendI2C(PH_I2C_ADDRESS, "Cal,low,4.00", 900);
     Serial.println("OK");
-  }
-  else if (strcmp(type, "neutral") == 0) {
-    phNeutralOffset = offset;
-    phNeutralOffsetPhValue = phValue;
+  } else if (strcmp(type, "neutral") == 0) {
+    sendI2C(PH_I2C_ADDRESS, "Cal,mid,7.00", 900);
     Serial.println("OK");
-  }
-  else if (strcmp(type, "base") == 0) {
-    phBaseOffset = offset;
-    phBaseOffsetPhValue = phValue;
+  } else if (strcmp(type, "base") == 0) {
+    sendI2C(PH_I2C_ADDRESS, "Cal,high,10.00", 900);
     Serial.println("OK");
-  }
-  else {
-    Serial.print("Wrong argument for ph offset type: ");
-    Serial.println(type);
-  }
-}
-
-void getPh() {
-  int sensor = analogRead(PH_SENSOR);
-  double ph;
-  if (sensor < phNeutralOffset) {
-    ph = mapDouble(sensor, phBaseOffset, phNeutralOffset, phBaseOffsetPhValue, phNeutralOffsetPhValue);
-  }
-  else {
-    ph = mapDouble(sensor, phNeutralOffset, phAcidOffset, phNeutralOffsetPhValue, phAcidOffsetPhValue);
-  }
-  Serial.println(ph);
-}
-
-void getTurb() {
-  double voltage = (double)analogRead(A0) * 5 / ANALOG_READ_MAX;
-  double NTP;
-  if (voltage < 2.56) {
-    NTP = 3000;
-  } else if (voltage > 4.2) {
-    NTP = 0;
   } else {
-    NTP = -1120.4*voltage*voltage + 5742.3*voltage - 4352.9;
+    Serial.println("ERROR");
   }
-  Serial.println(voltage);
+}
+
+void getPh() {  
+  char temperatureChar[10];
+  dtostrf(temperature,3,2,temperatureChar);
+  char temperatureCorrectionCommand[20] = "";
+  sprintf(temperatureCorrectionCommand, "T,%s", temperatureChar);
+  sendI2C(PH_I2C_ADDRESS, temperatureCorrectionCommand, 300);
+  Serial.println(sendI2C(PH_I2C_ADDRESS, "R", 900));
 }
 
 void setPumpMultiple(char* pump, char* movements) {
+  Serial.println("OK");
   char* movement = strtok_r(movements, ",", &movements);
   while (movement != 0) {
     char* pumpState = strtok_r(movement, ":", &movement);
@@ -157,10 +115,9 @@ void setPumpMultiple(char* pump, char* movements) {
     }
     movement = strtok_r(0, ",", &movements);
   }
-  Serial.println("OK");
 }
 
-void setPump(int pump, char* state) {
+void setPump(byte pump, char* state) {
   if (strcmp(state, "0") == 0) {
     turnPumpOff(pump);
   } else if (strcmp(state, "1") == 0) {
@@ -168,8 +125,7 @@ void setPump(int pump, char* state) {
   } else if (strcmp(state, "2") == 0) {
     turnPumpBackwards(pump);
   } else {
-    Serial.print("Wrong argument for pump state: ");
-    Serial.println(state);
+    Serial.print("ERROR");
   }
 }
 
@@ -191,6 +147,27 @@ void turnPumpBackwards(int pump) {
   digitalWrite(PUMPENABLE[pump], HIGH);
 }
 
-double mapDouble(double x, double in_min, double in_max, double out_min, double out_max) {
-  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+char* sendI2C(int address, char* data, int readDelay) {
+  Wire.beginTransmission(address);
+  Wire.write(data);
+  Wire.endTransmission();
+  delay(readDelay);
+  Wire.requestFrom(address, 20, 1);
+  byte code = Wire.read();
+  if (code != 1) {
+    Wire.endTransmission();
+    return "ERROR";
+  }
+  char response[20];
+  byte i = 0;
+  while (Wire.available()) {
+    char in_char = Wire.read();
+    response[i] = in_char;
+    i++;
+    if (in_char == 0) {
+      Wire.endTransmission();
+      break;
+    }
+  }
+  return response;
 }

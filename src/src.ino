@@ -56,7 +56,7 @@ void loop() {
     else if (strcmp(command, "CP") == 0) {
       char type[2];
       Serial.readBytes(type, 2);
-      command[1] = 0;
+      type[1] = 0;
       Serial.println(calibratePh(type));
     }
     else if (strcmp(command, "GP") == 0) {
